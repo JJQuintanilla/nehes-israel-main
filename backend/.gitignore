@@ -1,0 +1,6 @@
+/venv
+/sandbox
+.env
+service_account.json
+__pycache__/
+.env.dist
