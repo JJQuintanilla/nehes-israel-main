@@ -5,11 +5,12 @@ import { format } from "date-fns"
 import { Phone, PhoneOff } from "lucide-react"
 import { Sidebar, SidebarContent, SidebarHeader, SidebarFooter, SidebarRail } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
-import { fetchCallHistory, type CallRecord } from "@/lib/api"
+import { fetchMongoData } from "@/lib/api"
 import { useLanguage } from "@/components/language-provider"
+import { log } from "console"
 
 export function CallHistorySidebar() {
-  const [callHistory, setCallHistory] = useState<CallRecord[]>([])
+  const [callHistory, setCallHistory] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const { t, dir } = useLanguage()
 
@@ -19,8 +20,10 @@ export function CallHistorySidebar() {
   useEffect(() => {
     const loadCallHistory = async () => {
       try {
-        const history = await fetchCallHistory()
+        const history = await fetchMongoData();
         setCallHistory(history)
+        
+        
       } catch (error) {
         console.error("Failed to load call history:", error)
       } finally {
@@ -51,26 +54,17 @@ export function CallHistorySidebar() {
                 key={call.id}
                 className="p-3 border rounded-md hover:bg-gray-50 transition-colors dark:border-[#D29D0E]/30 dark:hover:bg-[#D29D0E]/10"
               >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <div className="font-medium text-[#122347] dark:text-[#D29D0E]">{call.customerNumber}</div>
-                    <div className="text-sm text-gray-500 dark:text-gray-300">
-                      {t("table.agent")}: {call.agentNumber}
-                    </div>
-                    <div className="text-xs text-gray-400 dark:text-gray-400">
-                      {format(new Date(call.timestamp), "MMM d, yyyy h:mm a")}
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end">
-                    {call.status === "connected" ? (
-                      <>
-                        <Phone className="h-4 w-4 text-green-500" />
-                        <span className="text-xs text-gray-500 dark:text-gray-300">{call.duration}s</span>
-                      </>
-                    ) : (
-                      <PhoneOff className="h-4 w-4 text-red-500" />
-                    )}
-                  </div>
+                <div className="font-medium text-[#122347] dark:text-[#D29D0E]">
+                  {call.full_name}
+                </div>
+                <div className="text-sm text-gray-500 dark:text-gray-300">
+                  Phone: {call.phone_number}
+                </div>
+                <div className="text-xs text-gray-400 dark:text-gray-400">
+                  Project: {call.status}
+                </div>
+                <div className="text-xs text-gray-400 dark:text-gray-400">
+                  Status: {call.isCalled ? "✅ Called" : "❌ Not Yet"}
                 </div>
               </div>
             ))}

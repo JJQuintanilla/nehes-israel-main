@@ -1,6 +1,7 @@
 import os
 import datetime
 from flask import Flask, request, Response, jsonify
+from pymongo import MongoClient
 from dotenv import load_dotenv
 
 from twilio.twiml.voice_response import VoiceResponse, Dial, Number
@@ -12,6 +13,9 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 from flask_cors import CORS
+
+from datetime import datetime
+
 
 load_dotenv()
 app = Flask(__name__)
@@ -35,6 +39,20 @@ GOOGLE_API_JSON = os.getenv('GOOGLE_API_JSON')
 CALLBACK_BASE = os.getenv('CALLBACK_BASE', 'https://t6d2lxxc1vjn.share.zrok.io/')
 VOICE_ACCEPT_PATH = "/voice/accept"
 VOICE_BUSY_PATH = "/voice/busy"
+
+mongo_uri = "mongodb+srv://twosteps:oPHtirlhT7XVkuQu@two-steps-cluster.jqvxlr8.mongodb.net/"
+client = MongoClient(mongo_uri)
+db = client['nehes_israel']           # Replace with your database name
+collection = db['my_db']
+
+try:
+    client = MongoClient(mongo_uri)
+    db = client.admin
+    server_status = db.command("serverStatus")
+    print("✅ Connected to MongoDB!")
+except Exception as e:
+    print("❌ Connection failed:", e)
+
 
 def log_request(name):
     print(f"\n====== Incoming Twilio Webhook ({name}) ======")
@@ -279,20 +297,63 @@ def twilio_callback():
     update_sheet_status(call_sid, call_status, duration, from_number, to_number)
     return ("", 204)
 
-@app.route("/call_history", methods=["GET"])
-def get_call_history():
-    gc = gspread_client()
-    sh = gc.open_by_key(GOOGLE_SHEET_ID)
-    sheet = sh.worksheet("call_history")
-    records = sheet.get_all_records()
-    # Ensure duration is always an int (if present)
-    for rec in records:
-        if "duration" in rec and isinstance(rec["duration"], str) and rec["duration"].isdigit():
-            rec["duration"] = int(rec["duration"])
-        elif "duration" in rec and rec["duration"] == "":
-            rec["duration"] = 0
-    # Reverse so latest calls (bottom rows) come first
-    return jsonify(records[::-1])
+@app.route("/api/mongo-data", methods=["GET"])
+def get_mongo_data():
+    try:
+        data = list(collection.find({}, {
+            "_id": 0,
+            "full_name": 1,
+            "phone_number": 1,
+            "project_name": 1,
+            "isCalled": 1,
+            "agentNumber": 1,  # make sure this exists in Mongo
+            "timestamp": 1,
+            "status": 1,
+            "duration": 1,
+            "customerNumber": 1
+        }))
+
+        for record in data:
+            record["timestamp"] = datetime.utcnow().isoformat()
+
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+@app.route('/api/update-missing-iscalls', methods=['POST'])
+def update_missing_iscalls():
+    data = request.json
+    phone_numbers = data.get('phoneNumbers', [])
+    
+    if not phone_numbers:
+        return jsonify({"message": "No data to update"}), 400
+
+    result = collection.update_many(
+        {"phone_number": {"$in": phone_numbers}, "isCalled": {"$exists": False}},
+        {"$set": {"isCalled": "no"}}
+    )
+    
+    return jsonify({
+        "matched": result.matched_count,
+        "modified": result.modified_count
+    }), 200
+
+
+
+# @app.route("/call_history", methods=["GET"])
+# def get_call_history():
+#     gc = gspread_client()
+#     sh = gc.open_by_key(GOOGLE_SHEET_ID)
+#     sheet = sh.worksheet("call_history")
+#     records = sheet.get_all_records()
+#     # Ensure duration is always an int (if present)
+#     for rec in records:
+#         if "duration" in rec and isinstance(rec["duration"], str) and rec["duration"].isdigit():
+#             rec["duration"] = int(rec["duration"])
+#         elif "duration" in rec and rec["duration"] == "":
+#             rec["duration"] = 0
+#     # Reverse so latest calls (bottom rows) come first
+#     return jsonify(records[::-1])
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=5001, debug=True)

@@ -55,15 +55,15 @@ const translations: Translations = {
     he: "מתקשר למובילים...",
   },
   "history.title": {
-    en: "Call History",
-    he: "היסטוריית שיחות",
+    en: "Leads",
+    he: "לידים",
   },
   "history.subtitle": {
-    en: "Recent calls bridged to agents",
-    he: "שיחות אחרונות שגושרו לסוכנים",
+    "en": "List of leads",
+    "he": "רשימת לידים"
   },
   "history.tabs.recent": {
-    en: "Recent",
+    en: "List",
     he: "אחרונות",
   },
   "history.tabs.all": {
@@ -77,6 +77,10 @@ const translations: Translations = {
   "table.customer": {
     en: "Customer Number",
     he: "מספר לקוח",
+  },
+  "table.customer_name": {
+    en: "Customer Name",
+    he: "שם הלקוח"
   },
   "table.agent": {
     en: "Agent Number",

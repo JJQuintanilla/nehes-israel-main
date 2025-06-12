@@ -1,19 +1,30 @@
 "use client"
 
-import { useState, useRef, useEffect, JSX } from "react"
+import { useState, useRef, useEffect, useMemo, useCallback, JSX } from "react"
 import { Users, CheckCircle, AlertCircle, Clock, Phone, PhoneOff } from "lucide-react"
 import { format } from "date-fns"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Keypad } from "@/components/keypad"
-import { bridgeCall, tripleCallLeads, fetchCallHistory, type CallRecord, type Lead } from "@/lib/api"
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select"
+import { bridgeCall, tripleCallLeads, fetchMongoData, type CallRecord, type Lead } from "@/lib/api"
 import { AppHeader } from "@/components/app-header"
 import { useLanguage } from "@/components/language-provider"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { statusKey } from "@/lib/ui"
+import { countryCodes } from "@/lib/country-codes"
+
+import { LOCAL_BACKEND_URL } from "@/lib/api"; // adjust path if different
+
 
 export default function CallingApp() {
   const [agentNumber, setAgentNumber] = useState("")
@@ -33,13 +44,28 @@ export default function CallingApp() {
   const agentInputRef = useRef<HTMLInputElement>(null)
 
   const { t, dir } = useLanguage()
+  const [visibleCount, setVisibleCount] = useState(25)
+  const [hasMoreData, setHasMoreData] = useState(true)
 
+  const [agentCountryCode, setAgentCountryCode] = useState("+972")
+  const [customerCountryCodes, setCustomerCountryCodes] = useState<string[]>(["+972", "+972", "+972"])
+
+  const visibleHistory = useMemo(() => callHistory.slice(0, visibleCount), [callHistory, visibleCount])
   // Load call history on component mount
   useEffect(() => {
     const loadCallHistory = async () => {
       try {
-        const history = await fetchCallHistory()
+        const history = await fetchMongoData()
         setCallHistory(history)
+
+        const missingIsCalled = history.filter(item => !("isCalled" in item))
+        if (missingIsCalled.length > 0) {
+          await fetch(`${LOCAL_BACKEND_URL}/api/update-missing-iscalls`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phoneNumbers: missingIsCalled.map(d => d.phone_number) }),
+          })
+        }
       } catch (error) {
         console.error("Failed to load call history:", error)
       } finally {
@@ -50,7 +76,25 @@ export default function CallingApp() {
     loadCallHistory()
   }, [])
 
-  const handleCall = async () => {
+  const handleScroll = useCallback(async (e: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = e.currentTarget
+    if (scrollTop + clientHeight >= scrollHeight - 10 && hasMoreData) {
+      try {
+        const history = await fetchMongoData()
+        if (history.length > callHistory.length) {
+          setCallHistory(history)
+          setVisibleCount((prev) => prev + 5)
+        } else {
+          setHasMoreData(false)
+        }
+      } catch (error) {
+        console.error("Failed to load more history:", error)
+      }
+    }
+  }, [callHistory, hasMoreData])
+
+
+/*   const handleCall = async () => {
     if (!agentNumber || customerNumbers.every(num => !num.trim())) return
     const numbersList = customerNumbers.filter(num => !!num.trim())
     if (numbersList.length === 0) return
@@ -60,14 +104,44 @@ export default function CallingApp() {
       await bridgeCall(agentNumber, numbersList)
 
       // Refresh call history after a successful call
-      const history = await fetchCallHistory()
+      const history = await fetchMongoData()
       setCallHistory(history)
     } catch (error) {
       console.error("Failed to bridge call:", error)
     } finally {
       setIsCallInProgress(false)
     }
-  }
+  } */
+
+    const handleCall = async () => {
+      if (!agentNumber || customerNumbers.every(num => !num.trim())) return;
+
+      // Merge country code + number for agent
+      const fullAgentNumber = `${agentCountryCode}${agentNumber.trim()}`;
+
+      // Merge customer numbers with their corresponding country codes
+      const numbersList = customerNumbers
+        .map((num, idx) => {
+          const trimmed = num.trim();
+          return trimmed ? `${customerCountryCodes[idx]}${trimmed}` : null;
+        })
+        .filter((fullNum): fullNum is string => !!fullNum);
+
+      if (numbersList.length === 0) return;
+
+      setIsCallInProgress(true);
+      try {
+        await bridgeCall(fullAgentNumber, numbersList);
+
+        const history = await fetchMongoData();
+        setCallHistory(history);
+      } catch (error) {
+        console.error("Failed to bridge call:", error);
+      } finally {
+        setIsCallInProgress(false);
+      }
+    };
+
 
   const handleTripleCall = async () => {
     setIsTripleCallInProgress(true)
@@ -99,7 +173,7 @@ export default function CallingApp() {
       }
 
       // Refresh call history after a successful triple call
-      const history = await fetchCallHistory()
+      const history = await fetchMongoData()
       setCallHistory(history)
 
       setTimeout(() => setTripleCallStatus((prev) => ({ ...prev, show: false })), 5000)
@@ -171,7 +245,7 @@ export default function CallingApp() {
 
   const loadCallHistory = async () => {
     try {
-      const history = await fetchCallHistory()
+      const history = await fetchMongoData()
       setCallHistory(history)
     } catch (error) {
       console.error("Failed to load call history:", error)
@@ -180,17 +254,28 @@ export default function CallingApp() {
     }
   }
 
-  useEffect(() => {
-    // Initial load on mount
-    loadCallHistory()
+/*   useEffect(() => {
+    const loadInitialHistory = async () => {
+      try {
+        const history = await fetchMongoData()
+        setCallHistory(history)
+        const missingIsCalled = history.filter(item => !("isCalled" in item))
+        if (missingIsCalled.length > 0) {
+          await fetch(`${LOCAL_BACKEND_URL}/api/update-missing-iscalls`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phoneNumbers: missingIsCalled.map(d => d.phone_number) }),
+          })
+        }
+      } catch (error) {
+        console.error("Failed to load call history:", error)
+      } finally {
+        setIsLoadingHistory(false)
+      }
+    }
 
-    // Set up interval to reload every 10 seconds (10,000 ms)
-    const interval = setInterval(() => {
-      loadCallHistory()
-    }, 10000)
-
-    return () => clearInterval(interval) // cleanup when component unmounts
-  }, [])
+    loadInitialHistory()
+  }, []) */
   
   // Icon/class helpers
   const iconMarginClass = dir === "rtl" ? "ml-1" : "mr-1"
@@ -248,6 +333,21 @@ export default function CallingApp() {
     )
   }
 
+  const handleFillCustomerNumber = (phoneNumber: string) => {
+    const updatedNumbers = [...customerNumbers];
+    const updatedCodes = [...customerCountryCodes];
+
+    const emptyIndex = updatedNumbers.findIndex((num) => num.trim() === "");
+
+    if (emptyIndex !== -1) {
+      updatedNumbers[emptyIndex] = phoneNumber.toString();
+      updatedCodes[emptyIndex] = "+972"; // or extract from number if available
+      setCustomerNumbers(updatedNumbers);
+      setCustomerCountryCodes(updatedCodes);
+    }
+  };
+
+
   return (
     <div className="flex flex-col min-h-screen bg-background dark:bg-[#122347]" dir={dir}>
       <AppHeader />
@@ -289,16 +389,28 @@ export default function CallingApp() {
                   <Label htmlFor="agentNumber" className="text-foreground dark:text-[#D29D0E]">
                     {t("agent.number")}
                   </Label>
-                  <Input
-                    id="agentNumber"
-                    ref={agentInputRef}
-                    type="tel"
-                    placeholder={t("placeholder.agent")}
-                    value={agentNumber}
-                    onChange={(e) => setAgentNumber(e.target.value)}
-                    onFocus={() => setFocusedInput("agent")}
-                    className="border-input dark:border-[#D29D0E]/50 dark:bg-[#122347]/80 dark:text-white focus-visible:ring-[#D29D0E]"
-                  />
+                  <div className="flex gap-2">
+                    <Select value={agentCountryCode} onValueChange={setAgentCountryCode}>
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue placeholder="Country" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {countryCodes.map((c) => (
+                          <SelectItem key={c.iso} value={c.dial_code}>
+                            {c.iso} ({c.dial_code})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      id="agentNumber"
+                      type="tel"
+                      placeholder={t("placeholder.agent")}
+                      value={agentNumber}
+                      onChange={(e) => setAgentNumber(e.target.value)}
+                      className="border-input dark:border-[#D29D0E]/50 dark:bg-[#122347]/80 dark:text-white focus-visible:ring-[#D29D0E]"
+                    />
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -307,23 +419,45 @@ export default function CallingApp() {
                   </Label>
                   <div className="flex flex-col space-y-2">
                     {customerNumbers.map((num, idx) => (
-                      <Input
-                        key={idx}
-                        id={`customerNumber${idx}`}
-                        type="tel"
-                        placeholder={t("placeholder.customer")}
-                        value={num}
-                        onChange={e => {
-                          const newNumbers = [...customerNumbers];
-                          newNumbers[idx] = e.target.value;
-                          setCustomerNumbers(newNumbers);
-                        }}
-                        onFocus={() => setFocusedInput({ type: "customer", idx })}
-                        className="border-input dark:border-[#D29D0E]/50 dark:bg-[#122347]/80 dark:text-white focus-visible:ring-[#D29D0E]"
-                      />
+                      <div key={idx} className="flex gap-2">
+                        <Select
+                          value={customerCountryCodes[idx]}
+                          onValueChange={(value) => {
+                            const updated = [...customerCountryCodes];
+                            updated[idx] = value;
+                            setCustomerCountryCodes(updated);
+                          }}
+                        >
+                          <SelectTrigger className="w-[180px]">
+                            <SelectValue placeholder="Country" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {countryCodes.map((c) => (
+                              <SelectItem key={c.iso} value={c.dial_code}>
+                                {c.iso} ({c.dial_code})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+
+                        <Input
+                          id={`customerNumber${idx}`}
+                          type="tel"
+                          placeholder={t("placeholder.customer")}
+                          value={num}
+                          onChange={(e) => {
+                            const newNumbers = [...customerNumbers];
+                            newNumbers[idx] = e.target.value;
+                            setCustomerNumbers(newNumbers);
+                          }}
+                          onFocus={() => setFocusedInput({ type: "customer", idx })}
+                          className="border-input dark:border-[#D29D0E]/50 dark:bg-[#122347]/80 dark:text-white focus-visible:ring-[#D29D0E]"
+                        />
+                      </div>
                     ))}
                   </div>
                 </div>
+
 
                 <Keypad onKeyPress={handleKeypadInput} onBackspace={handleKeypadBackspace} />
 
@@ -376,7 +510,7 @@ export default function CallingApp() {
               <Card className="dark:border-[#D29D0E]/30 dark:bg-[#122347]/50">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-xl font-bold text-foreground dark:text-white">
-                    {t("activeLeads.title")}
+                    dr{t("activeLeads.title")}
                   </CardTitle>
                   <CardDescription className="text-muted-foreground dark:text-gray-300">
                     {t("activeLeads.description")}
@@ -414,37 +548,38 @@ export default function CallingApp() {
               </CardHeader>
               <CardContent>
                 <Tabs defaultValue="recent" className="w-full">
-                  <TabsList className="mb-4">
-                    <TabsTrigger value="recent">{t("history.tabs.recent")}</TabsTrigger>
-                    <TabsTrigger value="all">{t("history.tabs.all")}</TabsTrigger>
-                  </TabsList>
-
-                  <TabsContent value="recent" className="mt-0">
-                    {isLoadingHistory ? (
-                      <div className="flex justify-center items-center h-40">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#122347] dark:border-[#D29D0E]"></div>
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {callHistory.slice(0, 5).map((call) => (
-                          <div
-                            key={call.id}
-                            className="p-3 border rounded-md hover:bg-gray-50 transition-colors dark:border-[#D29D0E]/30 dark:hover:bg-[#D29D0E]/10"
-                          >
+                  <div className="h-[500px] overflow-y-auto pr-2" onScroll={handleScroll}>
+                    <TabsContent value="recent" className="mt-0">
+                      {isLoadingHistory ? (
+                        <div className="flex justify-center items-center h-40">
+                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#122347] dark:border-[#D29D0E]"></div>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {visibleHistory.map((call, index) => (
+                            <div
+                              key={`${call.id ?? call.timestamp}-${call.agentNumber}-${index}`}
+                              onClick={() => {
+                                if (call.phone_number) {
+                                  handleFillCustomerNumber(call.phone_number)
+                                }
+                              }}
+                              className="p-3 border rounded-md hover:bg-gray-50 transition-colors dark:border-[#D29D0E]/30 dark:hover:bg-[#D29D0E]/10"
+                            >
                             <div className="flex items-start justify-between">
                               <div>
                                 <div className="font-medium text-foreground dark:text-[#D29D0E]">
-                                  {call.customerNumber}
+                                  {t("table.customer_name")} : {call.full_name ? call.full_name : "N/A"}
                                 </div>
                                 <div className="text-sm text-muted-foreground dark:text-gray-300">
-                                  {t("table.agent")}: {call.agentNumber}
+                                  {t("table.customer")}: {call.phone_number}
                                 </div>
-                                <div className="text-xs text-muted-foreground/70 dark:text-gray-400">
-                                  {format(new Date(call.timestamp), "MMM d, yyyy h:mm a")}
+                                <div className="text-sm text-muted-foreground dark:text-gray-300">
+                                  {t("table.status")}: {call.status}
                                 </div>
                               </div>
                               <div className="flex flex-col items-end">
-                                {renderStatusWithIcon(call.status)}
+                                {call.isCalled ? (call.isCalled == "yes" ? "Called" : "Not Called") : 'Not Called'}
                                 {call.duration > 0 && (
                                   <span className="text-xs text-muted-foreground dark:text-gray-300">
                                     {call.duration}s
@@ -453,50 +588,11 @@ export default function CallingApp() {
                               </div>
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </TabsContent>
-
-                  <TabsContent value="all" className="mt-0">
-                    {isLoadingHistory ? (
-                      <div className="flex justify-center items-center h-40">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#122347] dark:border-[#D29D0E]"></div>
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="w-full border-collapse">
-                          <thead>
-                            <tr className="bg-[#122347] text-white dark:bg-[#D29D0E] dark:text-[#122347]">
-                              <th className="p-3 text-left">{t("table.datetime")}</th>
-                              <th className="p-3 text-left">{t("table.customer")}</th>
-                              <th className="p-3 text-left">{t("table.agent")}</th>
-                              <th className="p-3 text-left">{t("table.status")}</th>
-                              <th className="p-3 text-left">{t("table.duration")}</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {callHistory.map((call) => (
-                              <tr
-                                key={call.id}
-                                className="border-b hover:bg-gray-50 dark:border-[#D29D0E]/30 dark:hover:bg-[#D29D0E]/10"
-                              >
-                                <td className="p-3 dark:text-white">
-                                  {format(new Date(call.timestamp), "MMM d, yyyy h:mm a")}
-                                </td>
-                                <td className="p-3 dark:text-white">{call.customerNumber}</td>
-                                <td className="p-3 dark:text-white">{call.agentNumber}</td>
-                                <td className="p-3">{renderStatusWithIcon(call.status)}</td>
-                                <td className="p-3 dark:text-white">
-                                  {call.duration > 0 ? `${call.duration} seconds` : "N/A"}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </TabsContent>
+                          ))}
+                        </div>
+                      )}
+                    </TabsContent>
+                  </div>
                 </Tabs>
               </CardContent>
             </Card>

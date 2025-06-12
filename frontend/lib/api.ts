@@ -1,8 +1,8 @@
 // Mock API functions for Twilio integration
 
 const BACKEND_URL = 'https://nehes-israel-system-backend.onrender.com';
-// const LOCAL_BACKEND_URL = 'http://localhost:5001';
-const LOCAL_BACKEND_URL = 'https://f21e-143-44-168-187.ngrok-free.app';
+export const LOCAL_BACKEND_URL = 'http://localhost:5000';
+//const LOCAL_BACKEND_URL = 'https://f21e-143-44-168-187.ngrok-free.app';
 
 export async function bridgeCall(agentNumber: string, customerNumbers: string[]): Promise<void> {
   // console.log(agentNumber)
@@ -20,15 +20,12 @@ export async function bridgeCall(agentNumber: string, customerNumbers: string[])
   }
 }
 
-export async function fetchCallHistory(): Promise<CallRecord[]> {
-  const response = await fetch(`${LOCAL_BACKEND_URL}/call_history`);
+export async function fetchMongoData(): Promise<any[]> {
+  const response = await fetch(`${LOCAL_BACKEND_URL}/api/mongo-data`);
   if (!response.ok) {
     throw new Error(`API error: ${response.status} - ${await response.text()}`);
   }
-  const data = await response.json();
-  // If your backend returns `call_sid` instead of `id`, remap here if needed
-  // But if using the code I provided earlier ("id" is call_sid, everything else matches), this is fine!
-  return data;
+  return await response.json();
 }
 
 export interface Lead {
@@ -74,15 +71,21 @@ export async function tripleCallLeads(agentNumber: string): Promise<TripleCallRe
   };
 }
 
-export interface CallRecord {
-  id: string
-  timestamp: string
-  agentNumber: string
+export type CallRecord = {
+  id?: string
+  full_name?: string
+  phoneNumber?: string
+  phone_number?: string
   customerNumber: string
-  // status: "connected" | "dropped"
+  agentNumber: string
+  timestamp: string
   status: string
   duration: number
+  isCalled?: string
 }
+
+
+
 
 export interface Lead {
   id: string
